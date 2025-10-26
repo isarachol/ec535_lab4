@@ -218,7 +218,7 @@ static int mytraffic_setup (void){
     btn1 = setup_gpio(btn1_pin);
     if(IS_ERR(btn1)) return(PTR_ERR(btn1));
 
-    /*========= Setup output and imput =========*/
+    /*========= Setup output and input =========*/
     // Red light
     gpio_direction(red, true, 0); 
 
@@ -272,7 +272,34 @@ static irqreturn_t btn0_handler(int irq, void *dev_id)
     return IRQ_HANDLED;
 }
 
-
+static ssize_t dev_write(struct file *filep, const char __user *buffer,
+                         size_t len, loff_t *offset)
+{
+    char user_input[16];
+    int new_cycle_rate;
+    
+    // Copy data from user space
+    if (len > sizeof(user_input) - 1)
+        len = sizeof(user_input) - 1;
+    
+    if (copy_from_user(user_input, buffer, len))
+        return -EFAULT;
+    
+    user_input[len] = '\0';
+    
+    // Parse the integer (1-9)
+    if (kstrtoint(user_input, 10, &new_cycle_rate) == 0) {
+        if (new_cycle_rate >= 1 && new_cycle_rate <= 9) {
+            cycle_rate = new_cycle_rate;
+            pr_info("mytraffic: Cycle rate set to %d Hz\n", cycle_rate);
+        } else {
+            // Silently ignore invalid values (per spec)
+            pr_debug("mytraffic: Invalid cycle rate %d, ignoring\n", new_cycle_rate);
+        }
+    }
+    
+    return len;
+}
 
 static int mytraffic_init(void)
 {
