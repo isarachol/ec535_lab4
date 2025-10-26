@@ -16,10 +16,9 @@ MODULE_LICENSE("GPL");
 #define red_pin 67
 #define yellow_pin 68
 #define green_pin 44
-#define yellow_pin 68
 #define btn0_pin 26
-#define btn1_pin 46
-#define major_number 60
+#define btn1_pin 47
+#define major_number 61
 #define minor_number 0
 
 //Device name
@@ -29,7 +28,7 @@ MODULE_LICENSE("GPL");
 //Global Variable 
 static struct gpio_desc *red, *green, *yellow, *btn0, *btn1;
 static int irq_btn0 = 0; //for changing mode
-static int irq_btn1 = 1; //for predstrain 
+static int irq_btn1 = 0; //for predstrain 
 static struct timer_list traffic_timer; //for tracking cycle
 
 //Variable for printing
@@ -53,23 +52,23 @@ static irqreturn_t btn0_handler(int irq, void *dev_id);
 static irqreturn_t btn1_handler(int irq, void *dev_id);
 static void free_gpio_pins(void);
 static int mytraffic_init (void);
-static int mytraffic_exit (void);
+static void mytraffic_exit (void);
 static void timer_callback(struct timer_list *t);
 static int mytraffic_setup (void);
 
 
 //Operation
-static struct file_operations mytraffic_fops{
+static struct file_operations mytraffic_fops = {
     .open = dev_open,
     .read = dev_read,
-    .write = dev_write.
+    .write = dev_write,
     .release = dev_release,
 };
 
 
 /* Function to init and exit functions */
 module_init(mytraffic_init);
-module_exit(mytimer_exit);
+module_exit(mytraffic_exit);
 
 // Helper function
 //Callback function 
@@ -135,7 +134,7 @@ static void timer_callback(struct timer_list *t){
 // Set up GPIO -> return pointer
 static struct gpio_desc *setup_gpio(unsigned int pin){
     struct gpio_desc *desc = gpio_to_desc(pin);
-    if(IS_ERR(red)){
+    if(IS_ERR(desc)){
         pr_err("Failed to get GPIO pin %d\n", pin);
     }
     return desc; 
@@ -149,8 +148,7 @@ static int gpio_direction(struct gpio_desc *pin, bool is_output, int value){
         ret = gpiod_direction_input(pin);
     }
     if(ret){
-        pr_err("Failed to set GPIO direction\n")
-        gpiod_put(pin), 
+        pr_err("Failed to set GPIO direction\n");
         return ret; 
     }else{
         return 0;
@@ -162,42 +160,18 @@ static int gpio_direction(struct gpio_desc *pin, bool is_output, int value){
 static int mytraffic_setup (void){
 
     int ret;
-    // Request all GPIOs first
+    
+    // Request GPIOs first (ADDED - REQUIRED!)
     ret = gpio_request(red_pin, "red-led");
-    if (ret) {
-        pr_err("mytraffic: Failed to request GPIO %d (red): %d\n", red_pin, ret);
-        gpiod_put(red);
-        return ret;
-    }
-    
+    if (ret) return ret;
     ret = gpio_request(yellow_pin, "yellow-led");
-    if (ret) {
-        pr_err("mytraffic: Failed to request GPIO %d (yellow): %d\n", yellow_pin, ret);
-        ggpiod_put(yellow);
-        return ret;
-    }
-    
+    if (ret) { gpio_free(red_pin); return ret; }
     ret = gpio_request(green_pin, "green-led");
-    if (ret) {
-        pr_err("mytraffic: Failed to request GPIO %d (green): %d\n", green_pin, ret);
-        gpiod_put(green);
-        return ret;
-    }
-    
+    if (ret) { gpio_free(red_pin); gpio_free(yellow_pin); return ret; }
     ret = gpio_request(btn0_pin, "btn0");
-    if (ret) {
-        pr_err("mytraffic: Failed to request GPIO %d (btn0): %d\n", btn0_pin, ret);
-        gpiod_put(btn0_pin);
-        return ret;
-    }
-    
+    if (ret) { gpio_free(red_pin); gpio_free(yellow_pin); gpio_free(green_pin); return ret; }
     ret = gpio_request(btn1_pin, "btn1");
-    if (ret) {
-        pr_err("mytraffic: Failed to request GPIO %d (btn1): %d\n", btn1_pin, ret);
-        gpiod_put(btn1);
-        return ret;
-    }
-    // return value for red, yellow and green
+    if (ret) { gpio_free(red_pin); gpio_free(yellow_pin); gpio_free(green_pin); gpio_free(btn0_pin); return ret; }
     
     // Red light
     red = setup_gpio(red_pin); 
@@ -244,16 +218,16 @@ static int mytraffic_setup (void){
 // Clean GPIO / free pin 
 static void free_gpio_pins(void){
     // Turn off all LEDs
-    gpiod_set_value(red, 0);
-    gpiod_set_value(yellow, 0);
-    gpiod_set_value(green, 0);
+    if (!IS_ERR_OR_NULL(red)) gpiod_set_value(red, 0);
+    if (!IS_ERR_OR_NULL(yellow)) gpiod_set_value(yellow, 0);
+    if (!IS_ERR_OR_NULL(green)) gpiod_set_value(green, 0);
     
-    // Release all GPIOs
-    gpiod_put(red);
-    gpiod_put(yellow);
-    gpiod_put(green);
-    gpiod_put(btn0);
-    gpiod_put(btn1);
+    // Release all GPIOs (CHANGED - use gpio_free)
+    gpio_free(red_pin);
+    gpio_free(yellow_pin);
+    gpio_free(green_pin);
+    gpio_free(btn0_pin);
+    gpio_free(btn1_pin);
 }
 
 // Press Button 0
@@ -265,10 +239,10 @@ static irqreturn_t btn0_handler(int irq, void *dev_id)
 }
 
 // Press Button 1
-static irqreturn_t btn0_handler(int irq, void *dev_id)
+static irqreturn_t btn1_handler(int irq, void *dev_id)
 {
-    if (current_mode == 0 && !pedestrian_press) {
-        pedestrian_present = true;
+    if (current_mode == 0 && !pedrestrian_press) {
+        pedrestrian_press = true;
     }
     
     return IRQ_HANDLED;
@@ -292,17 +266,20 @@ static ssize_t dev_read(struct file *filp, char *buf, size_t count, loff_t *f_po
         case 2:
             mode = "Flashing-yellow\n";
             break;
+        default:
+            mode = "Unknown\n";
+            break;
     }
 
     red_str = gpiod_get_value(red) ? "on": "off";
     yellow_str = gpiod_get_value(yellow) ? "on": "off";
-    green_str = gpiod_get_value(green) ? "Yes": "No";
+    green_str = gpiod_get_value(green) ? "on": "off";
 
-    ped_str = (pedrestrian_press || pedrestrian_cross )? "Active" : "No Active"
+    ped_str = (pedrestrian_press || pedrestrian_cross) ? "Active" : "Not Active";
 
     msg_len = snprintf(msg, sizeof(msg), 
                 "Current Mode: %s\n"
-                "Cycle Rate %d Hz\n"
+                "Cycle Rate: %d Hz\n"
                 "Red: %s, Yellow: %s, Green: %s\n"
                 "Pedestrian: %s\n", mode, cycle_rate, red_str, yellow_str, green_str, ped_str); 
 
@@ -340,13 +317,12 @@ static ssize_t dev_write(struct file *filp, const char __user *buffer,
     
     user_input[len] = '\0';
     
-    // Parse the integer (1-9)
+    // The integer (1-9)
     if (kstrtoint(user_input, 10, &new_cycle_rate) == 0) {
         if (new_cycle_rate >= 1 && new_cycle_rate <= 9) {
             cycle_rate = new_cycle_rate;
             pr_info("mytraffic: Cycle rate set to %d Hz\n", cycle_rate);
         } else {
-            // Silently ignore invalid values (per spec)
             pr_debug("mytraffic: Invalid cycle rate %d, ignoring\n", new_cycle_rate);
         }
     }
@@ -377,7 +353,7 @@ static int mytraffic_init(void)
 	{
 		printk(KERN_ALERT
 			"mytraffic: cannot obtain major number %d\n", major_number);
-		goto fail;
+		return result;
 	}
 	
 	printk(KERN_INFO "mytraffic: module loaded\n");
@@ -386,38 +362,58 @@ static int mytraffic_init(void)
     ret = mytraffic_setup();
     if (ret) {
         printk(KERN_ALERT "mytraffic: Failed to setup GPIO pins\n");
-        goto fail;
+        unregister_chrdev(major_number, "mytraffic");
+        return ret;
     }
 
     irq_btn0 = gpiod_to_irq(btn0);
     irq_btn1 = gpiod_to_irq(btn1);
     if (irq_btn0 < 0 || irq_btn1 < 0) {
         printk(KERN_ALERT "mytraffic: Failed to get IRQ numbers\n");
-        ret = -ENODEV;
-        goto fail;
+        free_gpio_pins();
+        unregister_chrdev(major_number, "mytraffic");
+        return -ENODEV;
     }
 
-	return 0;
+    // Request IRQs 
+    ret = request_irq(irq_btn0, btn0_handler, IRQF_TRIGGER_FALLING, "btn0_irq", NULL);
+    if (ret) {
+        printk(KERN_ALERT "mytraffic: Failed to request IRQ for btn0\n");
+        free_gpio_pins();
+        unregister_chrdev(major_number, "mytraffic");
+        return ret;
+    }
 
-fail: 
-	mytimer_exit(); 
-	return result;
+    ret = request_irq(irq_btn1, btn1_handler, IRQF_TRIGGER_FALLING, "btn1_irq", NULL);
+    if (ret) {
+        printk(KERN_ALERT "mytraffic: Failed to request IRQ for btn1\n");
+        free_irq(irq_btn0, NULL);
+        free_gpio_pins();
+        unregister_chrdev(major_number, "mytraffic");
+        return ret;
+    }
+
+	// Initialize and start timer
+    timer_setup(&traffic_timer, timer_callback, 0);
+    mod_timer(&traffic_timer, jiffies + msecs_to_jiffies(1000 / cycle_rate));
+
+	return 0;
 }
+
 static void mytraffic_exit(void)
 {
-    /* Freeing the major number */
-    unregister_chrdev(major_number, "mytraffic");
+    // Delete timer
+    del_timer_sync(&traffic_timer);
+
+    // Free IRQs (ADDED - REQUIRED!)
+    if (irq_btn0 > 0) free_irq(irq_btn0, NULL);
+    if (irq_btn1 > 0) free_irq(irq_btn1, NULL);
 
     // Free GPIO pins
     free_gpio_pins();
 
-    // Delete timer
-    del_timer_sync(&traffic_timer);
+    /* Freeing the major number */
+    unregister_chrdev(major_number, "mytraffic");
 
     printk(KERN_ALERT "Removing mytraffic module\n");
-
 }
-
-
-
-
