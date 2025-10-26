@@ -1,0 +1,35 @@
+
+// mytraffic
+Include the descriptor API to connect to GPIO
+Set the led to be output 
+Set the button to be input -> bt0 and bt 1
+Set int mode = 0 to keep track of mode changing
+Set int mode_bt1 = 0 to jeep track of pedrestrian button  
+if (bt0 is pressed):
+    mode += 1 ; change mode
+    if (mode > 2):
+        mode = 0 // reset
+
+if (bt1 is pressed):
+    mode_bt1 = 1;
+
+while(mode == 0):
+    if (mode_bt1 == 1):
+        red High 5 cycles   
+        yellow High 5 cycles
+        both 
+    else:
+        green out 3 cycles
+        yellow 1 cycles
+        red 2 cycles
+end
+
+while(mode == 1):
+    red High 1 cycle
+    red Low 1 cycle
+end 
+
+while(mode == 2):
+    yellow High 1 cycle
+    yellow Low 1 cycle
+
