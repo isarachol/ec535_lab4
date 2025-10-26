@@ -161,12 +161,12 @@ static int mytraffic_setup (void){
 
     int ret;
     
-    // Request GPIOs first (ADDED - REQUIRED!)
-    ret = gpio_request(red_pin, "red-led");
+    // Request GPIOs
+    ret = gpio_request(red_pin, "red_led");
     if (ret) return ret;
-    ret = gpio_request(yellow_pin, "yellow-led");
+    ret = gpio_request(yellow_pin, "yellow_led");
     if (ret) { gpio_free(red_pin); return ret; }
-    ret = gpio_request(green_pin, "green-led");
+    ret = gpio_request(green_pin, "green_led");
     if (ret) { gpio_free(red_pin); gpio_free(yellow_pin); return ret; }
     ret = gpio_request(btn0_pin, "btn0");
     if (ret) { gpio_free(red_pin); gpio_free(yellow_pin); gpio_free(green_pin); return ret; }
