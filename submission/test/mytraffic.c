@@ -9,6 +9,8 @@
 #include <linux/uaccess.h>
 #include <linux/device.h>
 
+MODULE_LICENSE("GPL");
+
 
 //Define name
 #define red_pin 67
@@ -196,7 +198,6 @@ static int mytraffic_setup (void){
         return ret;
     }
     // return value for red, yellow and green
-    int ret_red, ret_yellow, ret_green, ret_btn0, ret_btn1 = 0;
     
     // Red light
     red = setup_gpio(red_pin); 
@@ -220,21 +221,22 @@ static int mytraffic_setup (void){
 
     /*========= Setup output and input =========*/
     // Red light
-    gpio_direction(red, true, 0); 
+    ret = gpio_direction(red, true, 0); 
+    if (ret) return ret;
 
     //yellow light
-    gpio_direction(yellow, true, 0); 
-
+    ret = gpio_direction(yellow, true, 0); 
+    if (ret) return ret;
 
     //Green light 
-    gpio_direction(green, true, 0); 
-
+    ret = gpio_direction(green, true, 0); 
+    if (ret) return ret;
     //Button 0
-    gpio_direction(btn0, false, 0); 
-
+    ret = gpio_direction(btn0, false, 0); 
+    if (ret) return ret;
     //Button 1
-    gpio_direction(btn1, false, 0); 
-
+    ret = gpio_direction(btn1, false, 0); 
+    if (ret) return ret;
 
     return 0;
 }
@@ -272,7 +274,58 @@ static irqreturn_t btn0_handler(int irq, void *dev_id)
     return IRQ_HANDLED;
 }
 
-static ssize_t dev_write(struct file *filep, const char __user *buffer,
+static ssize_t dev_read(struct file *filp, char *buf, size_t count, loff_t *f_pos){
+    int msg_len;
+    char msg[256];
+    int error_count;
+    const char *mode;
+    const char *red_str, *yellow_str, *green_str;
+    const char *ped_str;
+
+    switch(current_mode){
+        case 0:
+            mode = "Normal Mode\n";
+            break;
+        case 1:
+            mode = "Flashing-red Mode\n";
+            break;
+        case 2:
+            mode = "Flashing-yellow\n";
+            break;
+    }
+
+    red_str = gpiod_get_value(red) ? "on": "off";
+    yellow_str = gpiod_get_value(yellow) ? "on": "off";
+    green_str = gpiod_get_value(green) ? "Yes": "No";
+
+    ped_str = (pedrestrian_press || pedrestrian_cross )? "Active" : "No Active"
+
+    msg_len = snprintf(msg, sizeof(msg), 
+                "Current Mode: %s\n"
+                "Cycle Rate %d Hz\n"
+                "Red: %s, Yellow: %s, Green: %s\n"
+                "Pedestrian: %s\n", mode, cycle_rate, red_str, yellow_str, green_str, ped_str); 
+
+    // Only read once
+    if (*f_pos > 0){
+        return 0;
+    }
+
+    // Copy to user space
+    error_count = copy_to_user(buf, msg, msg_len);
+
+    if (error_count == 0){
+        *f_pos += msg_len;
+        return msg_len;
+    }else{
+        pr_err("mytraffic: Failed to send data to user\n");
+        return -EFAULT;
+    }
+                
+}
+
+
+static ssize_t dev_write(struct file *filp, const char __user *buffer,
                          size_t len, loff_t *offset)
 {
     char user_input[16];
@@ -301,20 +354,48 @@ static ssize_t dev_write(struct file *filep, const char __user *buffer,
     return len;
 }
 
+static int dev_release(struct inode *inode, struct file *filp)
+{
+    pr_info("mytraffic: Device closed\n");
+    return 0;
+}
+
+static int dev_open(struct inode *inode, struct file *filp)
+{
+    pr_info("mytraffic: Device opened\n");
+    return 0;
+}
+
 static int mytraffic_init(void)
 {
 	int result = 0;
+    int ret = 0;
 
 	/* Registering device */
 	result = register_chrdev(major_number, "mytraffic", &mytraffic_fops);
 	if (result < 0)
 	{
 		printk(KERN_ALERT
-			"mytimer: cannot obtain major number %d\n", mytimer_major);
-		return result;
+			"mytraffic: cannot obtain major number %d\n", major_number);
+		goto fail;
 	}
 	
-	printk(KERN_INFO "mytimer: module loaded\n");
+	printk(KERN_INFO "mytraffic: module loaded\n");
+
+    //Set up GPIO pins
+    ret = mytraffic_setup();
+    if (ret) {
+        printk(KERN_ALERT "mytraffic: Failed to setup GPIO pins\n");
+        goto fail;
+    }
+
+    irq_btn0 = gpiod_to_irq(btn0);
+    irq_btn1 = gpiod_to_irq(btn1);
+    if (irq_btn0 < 0 || irq_btn1 < 0) {
+        printk(KERN_ALERT "mytraffic: Failed to get IRQ numbers\n");
+        ret = -ENODEV;
+        goto fail;
+    }
 
 	return 0;
 
@@ -322,32 +403,21 @@ fail:
 	mytimer_exit(); 
 	return result;
 }
-
-static int my_pdrv_remove(struct platform_device *pdev)
+static void mytraffic_exit(void)
 {
-    free_irq(irq, NULL);
-    gpiod_put(red);
-    gpiod_put(green);
-    gpiod_put(btn1);
-    gpiod_put(btn2);
-    pr_info("good bye reader!\n");
-    return 0;
+    /* Freeing the major number */
+    unregister_chrdev(major_number, "mytraffic");
+
+    // Free GPIO pins
+    free_gpio_pins();
+
+    // Delete timer
+    del_timer_sync(&traffic_timer);
+
+    printk(KERN_ALERT "Removing mytraffic module\n");
+
 }
 
-static struct platform_driver mypdrv = {
-    .probe      = my_pdrv_probe,
-    .remove     = my_pdrv_remove,
-    .driver     = {
-        .name     = "gpio_descriptor_sample",
-        .of_match_table = of_match_ptr(gpiod_dt_ids),
-        .owner    = THIS_MODULE,
-    },
-};
 
-module_platform_driver(mypdrv);
-MODULE_AUTHOR("John Madieu <john.madieu@gmail.com>");
-MODULE_LICENSE("GPL");
 
-/* Function to init and exit functions */
-module_init(mytimer_init);
-module_exit(mytimer_exit);
+
