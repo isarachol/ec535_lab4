@@ -1,0 +1,7 @@
+Thanadol Sangprasert (tontun55@bu.edu)
+Isara Cholaseuk (isara@bu.edu)
+
+Useful Links:
+- Legacy GPIO Interfaces: https://www.kernel.org/doc/html/v4.17/driver-api/gpio/legacy.html
+- Descriptor Consumer Interfaces: https://www.kernel.org/doc/html/v4.17/driver-api/gpio/consumer.html
+- 

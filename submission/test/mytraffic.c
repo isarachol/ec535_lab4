@@ -37,6 +37,7 @@ static int cycle_rate = 1; // default = 1 Hz
 static int count_cycle = 0; //Keep track of cycle
 static bool pedrestrian_press = false; //For track at the start of red
 static bool pedrestrian_cross = false; //For flashing yellow 5 cycles
+static bool lightbulb_checked = false; //For after checking lightbulb
 
 
 //Function
@@ -71,61 +72,95 @@ module_init(mytraffic_init);
 module_exit(mytraffic_exit);
 
 // Helper function
+
+// light up
+static void light_check(void)
+{
+    gpiod_set_value(red, 1);
+    gpiod_set_value(yellow, 1);
+    gpiod_set_value(green,1);
+    cycle_rate = 9; // so fast as if it was reset at falling edge
+    current_mode = 3;
+    lightbulb_checked = true;
+}
+
+static void reset(void)
+{
+    current_mode = 0;
+    cycle_rate = 1;
+    count_cycle = 0;
+    pedrestrian_press = false;
+    pedrestrian_cross = false;
+    lightbulb_checked = false;
+}
+
 //Callback function 
 static void timer_callback(struct timer_list *t){
-    switch(current_mode){
-        case 0:
-            if (pedrestrian_cross){
-                gpiod_set_value(red, 1);
-                gpiod_set_value(yellow, 1);
-                gpiod_set_value(green,0);
+    if (gpiod_get_value(btn0) && gpiod_get_value(btn1)) // if not pressed at the same time
+    {
+        light_check();
+    }
+    else
+    {
+        if (lightbulb_checked) // reset
+        {
+            reset();
+        }
 
-                if(++count_cycle >= 5){
-                    pedrestrian_press = false;
-                    pedrestrian_cross = false;
-                    count_cycle = 0;
-                }
-            }else{
-                int red_state = 0;
-                int yellow_state = 0;
-                int green_state = 0;
-                if (count_cycle < 3){
-                    green_state = 1;
-                }else if (count_cycle < 4){
-                    yellow_state = 1;
+        switch(current_mode){
+            case 0:
+                if (pedrestrian_cross){
+                    gpiod_set_value(red, 1);
+                    gpiod_set_value(yellow, 1);
+                    gpiod_set_value(green,0);
+
+                    if(++count_cycle >= 5){
+                        pedrestrian_press = false;
+                        pedrestrian_cross = false;
+                        count_cycle = 0;
+                    }
                 }else{
-                    red_state = 1; 
-                }  
-                gpiod_set_value(red, red_state);
-                gpiod_set_value(yellow, yellow_state);
-                gpiod_set_value(green, green_state);
+                    int red_state = 0;
+                    int yellow_state = 0;
+                    int green_state = 0;
+                    if (count_cycle < 3){
+                        green_state = 1;
+                    }else if (count_cycle < 4){
+                        yellow_state = 1;
+                    }else{
+                        red_state = 1; 
+                    }  
+                    gpiod_set_value(red, red_state);
+                    gpiod_set_value(yellow, yellow_state);
+                    gpiod_set_value(green, green_state);
 
-                if (count_cycle == 4 && pedrestrian_press){
-                    pedrestrian_cross = true;
-                    count_cycle = -1;
+                    if (count_cycle == 4 && pedrestrian_press){
+                        pedrestrian_cross = true;
+                        count_cycle = -1;
+                    }
+                    
+                    if (++count_cycle >= 6){
+                        count_cycle = 0;
+                    }
                 }
-                
-                if (++count_cycle >= 6){
-                    count_cycle = 0;
-                }
-            }
-            break;
-        
-        case 1:
-            gpiod_set_value(red, count_cycle % 2);
-            gpiod_set_value(yellow, 0);
-            gpiod_set_value(green, 0);
+                break;
+            
+            case 1:
+                gpiod_set_value(red, count_cycle % 2);
+                gpiod_set_value(yellow, 0);
+                gpiod_set_value(green, 0);
 
-            count_cycle ++;
-            break;
-        
-        case 2:
-            gpiod_set_value(red, 0);
-            gpiod_set_value(yellow, count_cycle % 2);
-            gpiod_set_value(green, 0);
+                count_cycle ++;
+                break;
+            
+            case 2:
+                gpiod_set_value(red, 0);
+                gpiod_set_value(yellow, count_cycle % 2);
+                gpiod_set_value(green, 0);
 
-            count_cycle ++;
-            break;
+                count_cycle ++;
+                break;
+        }
     }
 
     mod_timer(&traffic_timer, jiffies + msecs_to_jiffies(1000 / cycle_rate));
@@ -233,18 +268,41 @@ static void free_gpio_pins(void){
 // Press Button 0
 static irqreturn_t btn0_handler(int irq, void *dev_id)
 {
-    current_mode = (current_mode + 1) % 3;
-    count_cycle = 0;
+    if (gpiod_get_value(btn0) && gpiod_get_value(btn1)) // turn on right away
+    {
+        light_check();
+    }
+    else if (!(pedrestrian_cross || pedrestrian_press)) // don't change if predestrian active
+    {
+        // in case btn0 is pressed before timer is called
+        if (lightbulb_checked) // reset
+        {
+            reset();
+        }
+        current_mode = (current_mode + 1) % 3;
+        count_cycle = 0;
+    }
     return IRQ_HANDLED;
 }
 
 // Press Button 1
 static irqreturn_t btn1_handler(int irq, void *dev_id)
 {
-    if (current_mode == 0 && !pedrestrian_press) {
-        pedrestrian_press = true;
+    if (gpiod_get_value(btn0) && gpiod_get_value(btn1))
+    {
+        light_check();
     }
-    printk(KERN_INFO "pedestrian btn pressed\n");
+    else if (!(pedrestrian_cross || pedrestrian_press)) // don't change if predestrian active
+    {
+        // in case btn1 is pressed before timer is called
+        if (lightbulb_checked) // reset
+        {
+            reset();
+        }
+        if (current_mode == 0 && !pedrestrian_press) {
+            pedrestrian_press = true;
+        }
+    }
     
     return IRQ_HANDLED;
 }
@@ -259,16 +317,19 @@ static ssize_t dev_read(struct file *filp, char *buf, size_t count, loff_t *f_po
 
     switch(current_mode){
         case 0:
-            mode = "Normal Mode\n";
+            mode = "Normal Mode";
             break;
         case 1:
-            mode = "Flashing-red Mode\n";
+            mode = "Flashing-red Mode";
             break;
         case 2:
-            mode = "Flashing-yellow\n";
+            mode = "Flashing-yellow";
+            break;
+        case 3:
+            mode = "Lightbulb Check";
             break;
         default:
-            mode = "Unknown\n";
+            mode = "Unknown";
             break;
     }
 
@@ -279,10 +340,10 @@ static ssize_t dev_read(struct file *filp, char *buf, size_t count, loff_t *f_po
     ped_str = (pedrestrian_press || pedrestrian_cross) ? "Active" : "Not Active";
 
     msg_len = snprintf(msg, sizeof(msg), 
-                "Current Mode: %s\n"
+                "\nCurrent Mode: %s\n"
                 "Cycle Rate: %d Hz\n"
                 "Red: %s, Yellow: %s, Green: %s\n"
-                "Pedestrian: %s\n", mode, cycle_rate, red_str, yellow_str, green_str, ped_str); 
+                "Pedestrian: %s\n\n", mode, cycle_rate, red_str, yellow_str, green_str, ped_str); 
 
     // Only read once
     if (*f_pos > 0){
@@ -377,7 +438,7 @@ static int mytraffic_init(void)
     }
 
     // Request IRQs 
-    ret = request_irq(irq_btn0, btn0_handler, IRQF_TRIGGER_FALLING, "btn0_irq", NULL);
+    ret = request_irq(irq_btn0, btn0_handler, IRQF_TRIGGER_RISING, "btn0_irq", NULL);
     if (ret) {
         printk(KERN_ALERT "mytraffic: Failed to request IRQ for btn0\n");
         free_gpio_pins();
@@ -385,7 +446,7 @@ static int mytraffic_init(void)
         return ret;
     }
 
-    ret = request_irq(irq_btn1, btn1_handler, IRQF_TRIGGER_FALLING, "btn1_irq", NULL);
+    ret = request_irq(irq_btn1, btn1_handler, IRQF_TRIGGER_RISING, "btn1_irq", NULL);
     if (ret) {
         printk(KERN_ALERT "mytraffic: Failed to request IRQ for btn1\n");
         free_irq(irq_btn0, NULL);
