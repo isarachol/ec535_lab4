@@ -17,7 +17,7 @@ MODULE_LICENSE("GPL");
 #define yellow_pin 68
 #define green_pin 44
 #define btn0_pin 26
-#define btn1_pin 47
+#define btn1_pin 46
 #define major_number 61
 #define minor_number 0
 
@@ -244,6 +244,7 @@ static irqreturn_t btn1_handler(int irq, void *dev_id)
     if (current_mode == 0 && !pedrestrian_press) {
         pedrestrian_press = true;
     }
+    printk(KERN_INFO "pedestrian btn pressed\n");
     
     return IRQ_HANDLED;
 }
