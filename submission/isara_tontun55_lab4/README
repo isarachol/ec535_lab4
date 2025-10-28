@@ -5,3 +5,7 @@ Useful Links:
 - Legacy GPIO Interfaces: https://www.kernel.org/doc/html/v4.17/driver-api/gpio/legacy.html
 - Descriptor Consumer Interfaces: https://www.kernel.org/doc/html/v4.17/driver-api/gpio/consumer.html
 - Example code for legacy interface: https://embetronicx.com/tutorials/linux/device-drivers/gpio-driver-basic-using-raspberry-pi/
+
+Comtributions:
+- Thanadol: lead basic operational modes
+- Isara: lead additional features and extra credit
